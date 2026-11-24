@@ -118,6 +118,18 @@ class BaseModuleService:
                 written += 1
         return written
 
+    def _write_jsonl_replace(self, filepath: Path, records: list[dict[str, Any]]) -> int:
+        """以覆盖方式写入JSONL数据集，返回记录条数。
+
+        网格索引、热力聚合这类"整批重算"的产物每次都应代表该版本的全量结果，
+        覆盖写入可以避免重复追加把同一批输入算成两份。历史版本由来源归档保留。
+        """
+        _ensure_dir(filepath.parent)
+        with open(filepath, "w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+        return len(records)
+
     def _read_jsonl(self, filepath: Path) -> list[dict[str, Any]]:
         """从JSONL文件读取全部记录并返回字典列表。"""
         if not filepath.exists():

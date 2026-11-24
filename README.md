@@ -77,5 +77,47 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 空间来源配对（网格索引 ↔ 热力聚合）
+
+网格索引与热力聚合共用 `backend/app/services/spatial_inputs.py` 中的输入解析：
+定位点优先读坐标转换结果、缺失回退采集原始点，格与点必须属于同一来源版本。
+落格与热点算法仍分别留在两个领域服务里，稳定输入的口径不变。
+
+### 网格发布端
+
+| 能力 | 服务方法 | 接口 |
+| --- | --- | --- |
+| 输入就绪核对 | `check_input_readiness` | `POST /api/grid_index/readiness` |
+| 登记就绪状态 | `record_input_readiness` | `POST /api/grid_index/readiness/record` |
+| 发布完整配对（格 + 点 + 就绪凭据） | `publish_grid_index` | `POST /api/grid_index/publish` |
+| 撤回已发布配对 | `withdraw_grid_index` | `POST /api/grid_index/withdraw` |
+| 查看版本与配对 | `get_publication` / `get_published_pair` | `GET /api/grid_index/versions/{batch_key}`、`GET /api/grid_index/pair/{batch_key}` |
+
+- 生成网格时归档当次输入点快照并登记生成清单；发布登记整份"格 + 点"，
+  写入就绪凭据 `readiness_token`。
+- 坐标已更新但对应格尚未重建时，分区状态为 `待重建`，发布被拒绝，
+  不会仅凭新坐标文件存在就标成可发布。
+- 撤回只取消配对资格，归档文件保持可读；常规热力取数不再放行，
+  已交接的旧结果仍可按归档配对复盘。
+
+### 热力取数端
+
+| 能力 | 服务方法 | 接口 |
+| --- | --- | --- |
+| 取数资格核对 | `check_data_eligibility` | `GET /api/heatmap_aggregate/eligibility/{batch_key}` |
+| 独立核实分区就绪 | `verify_partition_inputs` | — |
+| 启动未确认重算 | `start_recompute` | `POST /api/heatmap_aggregate/recompute/start` |
+| 执行未确认重算 | `run_recompute` | `POST /api/heatmap_aggregate/recompute/run` |
+| 确认重算并交接 | `confirm_recompute` | `POST /api/heatmap_aggregate/recompute/confirm` |
+| 重算待办 | `list_pending_recomputes` | — |
+| 交接复盘 | `replay_handover` | `POST /api/heatmap_aggregate/handover/replay` |
+
+- 热力只读取已发布且输入就绪的完整配对；文件仍可读不等于仍可发布。
+- 每次重算记录实际采用的格版本、当时采用的点摘要与就绪凭据；
+  未确认重算会固定启动时的来源，新版本发布不会改变它。
+- 两个已发布版本各自可用，但不能跨版本配对：切换版本必须显式选择。
+- 每次交接留档，可按交接时的格与点复盘原值；若按旧版完成交接，
+  会为更新的已发布版本留下新的重算待办。
+
 领域：数据工程
 子方向：数据分析与数据应用
